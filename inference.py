@@ -36,13 +36,30 @@ def get_lower_edges(coordinates):
     return lower_edge1, lower_edge2
 
 
-model = YOLO("./runs/YOLO_YuGiOh_300eps_300523/train14/weights/best.pt")
+def crop_min_area_rect(img, rect):
+    # rotate img
+    angle = rect[2]
+    rows, cols = img.shape[0], img.shape[1]
+    M = cv2.getRotationMatrix2D((cols / 2, rows / 2), angle, 1)
+    img_rot = cv2.warpAffine(img, M, (cols, rows))
+
+    # rotate bounding box
+    rect0 = (rect[0], rect[1], 0.0)
+    box = cv2.boxPoints(rect0)
+    pts = np.int0(cv2.transform(np.array([box]), M))[0]
+    pts[pts < 0] = 0
+
+    # crop
+    img_crop = img_rot[pts[:, 0].min():pts[:, 0].max(), pts[:, 1].min():pts[:, 1].max()]
+    return img_crop
+
+
+model = YOLO("./runs/detect/train14/weights/best.pt")
 
 results = model(
-    source="./Videos/2023-07-02 16-26-49 (online-video-cutter.com).mp4",
+    source="/home/cose-ia/Downloads/YuGiOh_YOLO.v2i.yolov8/video/2023-07-02 16-26-49 (online-video-cutter.com).mp4",
     show_labels=False,
-    save=False,
-    device='cpu'
+    save=False
 )
 
 colors = {
@@ -69,10 +86,10 @@ fourcc = cv2.VideoWriter_fourcc(*'MJPG')
 video_writer = cv2.VideoWriter('filename.avi', fourcc, 30, (1280, 720))
 
 try:
-    for i, result in enumerate(results[0:]):
-        print(i)
+    for frame, result in enumerate(results[70:]):
+        print(frame)
         img = result.orig_img.copy()
-        for boxes in result:
+        for nbox, boxes in enumerate(result):
             x1, y1, x2, y2, = map(int, boxes.boxes.xyxy.squeeze())
             roi = img[y1:y2, x1:x2].copy()
             roi_original = img[y1:y2, x1:x2]
@@ -89,13 +106,13 @@ try:
             )
 
             roi[
-                height - int(0.71 * height): height - int(0.18 * height),
-                int(0.115 * width):width - int(0.115 * width)
+            height - int(0.71 * height): height - int(0.18 * height),
+            int(0.115 * width):width - int(0.115 * width)
             ] = ones1 * [1000, 1000, 1000]
 
             roi[
-                int(0.1 * height):int(0.27 * height),
-                int(0.115 * width):width - int(0.115 * width)
+            int(0.1 * height):int(0.27 * height),
+            int(0.115 * width):width - int(0.115 * width)
             ] = ones2 * [1000, 1000, 1000]
 
             roi = roi.reshape((roi.shape[0] * roi.shape[1], 3)).astype(float)
@@ -135,6 +152,7 @@ try:
                     rect = cv2.minAreaRect(c)
                     box = cv2.boxPoints(rect)
                     box = np.intp(box)
+                    # cv2.drawContours(roi_original, [box], 0, (152, 255, 119), 2)
                     edges1, edges2 = get_lower_edges(box)
 
                     dx1 = abs(edges1[0][0] - edges1[1][0])
@@ -152,7 +170,16 @@ try:
                         [edges1[1][0] + dx1 * 100 / dst1, edges1[1][1] + dy1 * 100 / dst1],
                     ], dtype=np.int64)
 
+                    contour2 = np.intp(cv2.boxPoints(cv2.minAreaRect(box_artwork)))
+
+                    artwork = crop_min_area_rect(roi_original, cv2.minAreaRect(box_artwork))
                     cv2.drawContours(roi_original, [box_artwork], 0, (119, 152, 255), 2)
+                    # cv2.drawContours(roi_original, [contour2], 0, (119, 255, 152), 2)
+                    # if artwork.shape[0] != 0 and artwork.shape[1] != 0:
+                    #     cv2.imwrite(
+                    #         '/home/cose-ia/Downloads/YuGiOh_YOLO.v2i.yolov8/ROI/video-remote-artwork-1/frame_{}_box_{}.png'.format(frame, nbox),
+                    #         artwork
+                    #     )
 
         # cv2.putText(img, str(i), (10, 10), cv2.FONT_HERSHEY_PLAIN, 1.0, (0, 0, 255), 2)
         video_writer.write(img)
