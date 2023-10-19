@@ -4,36 +4,72 @@ import numpy as np
 from ultralytics import YOLO
 
 
-def get_lower_edges(coordinates):
+def get_lower_edges(coordinates, h, w):
     # Convert the coordinates to a numpy array if it's not already
     if not isinstance(coordinates, np.ndarray):
         coordinates = np.array(coordinates)
+    try:
+        set1 = coordinates[np.argsort(coordinates[:, 0])][:2]
+        set2 = coordinates[np.argsort(coordinates[:, 1])][:2]
 
-    # Sort the coordinates in ascending order based on the y-coordinate
-    sorted_coordinates = coordinates[np.argsort(coordinates[:, 1])]
+        nrows, ncols = set1.shape
+        dtype = {'names': ['f{}'.format(i) for i in range(ncols)],
+                 'formats': ncols * [set1.dtype]}
 
-    # Get the two lower vertices of the rectangle
-    lower_vertices = sorted_coordinates[:2]
+        intersection = np.intersect1d(set1.view(dtype), set2.view(dtype))
+        intersection = intersection.view(set1.dtype).reshape(-1, ncols)[0]
 
-    # Calculate the center point of the rectangle
-    center = np.mean(coordinates, axis=0)
+        edge1 = np.where((coordinates == intersection).all(axis=1))[0][0]
 
-    # Sort the two lower vertices based on their angle with respect to the center
-    sorted_lower_vertices = sorted(lower_vertices,
-                                   key=lambda coord: np.arctan2(coord[1] - center[1], coord[0] - center[0]))
+        set1 = coordinates[np.argsort(coordinates[:, 0])][:2]
+        set2 = coordinates[np.argsort(coordinates[:, 1])][2:]
 
-    # Calculate the other two vertices
-    upper_vertices = sorted_coordinates[2:]
+        nrows, ncols = set1.shape
+        dtype = {'names': ['f{}'.format(i) for i in range(ncols)],
+                 'formats': ncols * [set1.dtype]}
 
-    # Sort the upper vertices based on their angle with respect to the center
-    sorted_upper_vertices = sorted(upper_vertices,
-                                   key=lambda coord: np.arctan2(coord[1] - center[1], coord[0] - center[0]))
+        intersection = np.intersect1d(set1.view(dtype), set2.view(dtype))
+        intersection = intersection.view(set1.dtype).reshape(-1, ncols)[0]
 
-    # Return the two pairs of coordinates of the two lower edges
-    lower_edge1 = sorted_lower_vertices[0], sorted_upper_vertices[1]
-    lower_edge2 = sorted_lower_vertices[1], sorted_upper_vertices[0]
+        edge2 = np.where((coordinates == intersection).all(axis=1))[0][0]
 
-    return lower_edge1, lower_edge2
+        set1 = coordinates[np.argsort(coordinates[:, 0])][2:]
+        set2 = coordinates[np.argsort(coordinates[:, 1])][:2]
+
+        nrows, ncols = set1.shape
+        dtype = {'names': ['f{}'.format(i) for i in range(ncols)],
+                 'formats': ncols * [set1.dtype]}
+
+        intersection = np.intersect1d(set1.view(dtype), set2.view(dtype))
+        intersection = intersection.view(set1.dtype).reshape(-1, ncols)[0]
+
+        edge3 = np.where((coordinates == intersection).all(axis=1))[0][0]
+
+        set1 = coordinates[np.argsort(coordinates[:, 0])][2:]
+        set2 = coordinates[np.argsort(coordinates[:, 1])][2:]
+
+        nrows, ncols = set1.shape
+        dtype = {'names': ['f{}'.format(i) for i in range(ncols)],
+                 'formats': ncols * [set1.dtype]}
+
+        intersection = np.intersect1d(set1.view(dtype), set2.view(dtype))
+        intersection = intersection.view(set1.dtype).reshape(-1, ncols)[0]
+
+        edge4 = np.where((coordinates == intersection).all(axis=1))[0][0]
+
+        if coordinates[edge1][0] - coordinates[edge3][0] < coordinates[edge1][1] - coordinates[edge2][1]:
+            if edge1 < h:
+                return [coordinates[edge1], coordinates[edge2]], [coordinates[edge3], coordinates[edge4]]
+            else:
+                return [coordinates[edge2], coordinates[edge1]], [coordinates[edge4], coordinates[edge3]]
+        else:
+            if edge1 < w:
+                return [coordinates[edge1], coordinates[edge3]], [coordinates[edge2], coordinates[edge4]]
+            else:
+                return [coordinates[edge3], coordinates[edge1]], [coordinates[edge4], coordinates[edge2]]
+
+    except:
+        return None, None
 
 
 def crop_min_area_rect(img, rect):
@@ -148,17 +184,20 @@ try:
             max_area = 8000
             for c in cnts:
                 area = cv2.contourArea(c)
+                # TODO: keep only max area rects
                 if min_area < area < max_area:
                     rect = cv2.minAreaRect(c)
                     box = cv2.boxPoints(rect)
                     box = np.intp(box)
-                    # cv2.drawContours(roi_original, [box], 0, (152, 255, 119), 2)
-                    edges1, edges2 = get_lower_edges(box)
+                    cv2.drawContours(roi_original, [box], 0, (152, 255, 119), 2)
+                    edges1, edges2 = get_lower_edges(box, roi_original.shape[0], roi_original.shape[1])
+                    if edges1 is None:
+                        break
 
-                    dx1 = abs(edges1[0][0] - edges1[1][0])
-                    dx2 = abs(edges2[0][0] - edges2[1][0])
-                    dy1 = abs(edges1[0][1] - edges1[1][1])
-                    dy2 = abs(edges2[0][1] - edges2[1][1])
+                    dx1 = edges1[1][0] - edges1[0][0]
+                    dx2 = edges2[1][0] - edges2[0][0]
+                    dy1 = edges1[1][1] - edges1[0][1]
+                    dy2 = edges2[1][1] - edges2[0][1]
 
                     dst1 = (dx1 ** 2 + dy1 ** 2) ** 0.5
                     dst2 = (dx2 ** 2 + dy2 ** 2) ** 0.5
@@ -166,8 +205,8 @@ try:
                     box_artwork = np.array([
                         [edges1[1][0] + dx1 * 5 / dst1, edges1[1][1] + dy1 * 5 / dst1],
                         [edges2[1][0] + dx2 * 5 / dst2, edges2[1][1] + dy2 * 5 / dst2],
-                        [edges2[1][0] + dx2 * 100 / dst2, edges2[1][1] + dy2 * 100 / dst2],
-                        [edges1[1][0] + dx1 * 100 / dst1, edges1[1][1] + dy1 * 100 / dst1],
+                        [edges2[1][0] + dx2 * 95 / dst2, edges2[1][1] + dy2 * 100 / dst2],
+                        [edges1[1][0] + dx1 * 95 / dst1, edges1[1][1] + dy1 * 100 / dst1],
                     ], dtype=np.int64)
 
                     contour2 = np.intp(cv2.boxPoints(cv2.minAreaRect(box_artwork)))
